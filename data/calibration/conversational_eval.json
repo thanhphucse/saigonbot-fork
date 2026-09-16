@@ -1,0 +1,26 @@
+{
+  "description": "Eval set for the conversational detector operating point (ACCEPT_TAU/HIGH_TAU/MARGIN). 'positive' entries must resolve to their kind; 'negative' entries must NOT be classified as conversational. Run scripts/calibrate_conversational.py to sweep thresholds.",
+  "positive": {
+    "greeting": ["hi", "hello there", "hey!", "good morning", "namaste", "hello bot"],
+    "thanks": ["thank you", "thanks a lot", "appreciate it", "that helped, thanks", "many thanks"],
+    "farewell": ["bye", "goodbye", "see you later", "gotta run, bye", "good night", "later!", "that's all, bye", "thank you, bye!"],
+    "how_are_you": ["how are you?", "how are you doing today?", "how's it going?", "you doing okay?"],
+    "ack": ["ok", "got it", "sounds good", "alright", "understood"]
+  },
+  "negative": [
+    "how are you useful?",
+    "how are your robots different from others?",
+    "hi, what products do you have?",
+    "what is your problem?",
+    "how much does a robot cost?",
+    "tell me about your warranty policy",
+    "who are you?",
+    "what can you do?",
+    "where are you located?",
+    "do your robots work in hospitals?",
+    "I need a quote for 10 kiosks",
+    "the robot arm is not working",
+    "what technologies do you use?",
+    "can you integrate with my warehouse system?"
+  ]
+}

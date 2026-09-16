@@ -15,7 +15,18 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
+
+from company_conversational import (
+    ACCEPT_TAU,
+    ConvHit,
+    ConversationalDetector,
+    CompanyConvKind,
+    HIGH_TAU,
+    MARGIN,
+    SHORT_QUERY_WORDS,
+    fast_detect,
+)
 
 
 class CompanyIntent(Enum):
@@ -64,6 +75,9 @@ class CompanyIntentResult:
     category: CompanyCategory
     entities: Optional[Dict] = None
     requires_clarification: bool = False
+    # Set only for CONVERSATIONAL results: which flavour of small talk this is
+    # (drives the LLM chitchat prompt and the canned fallbacks).
+    conv_kind: Optional[CompanyConvKind] = None
 
     def __post_init__(self):
         self.entities = self.entities or {}
@@ -83,20 +97,17 @@ class CompanyIntentResult:
             "entities": self.entities,
             "requires_clarification": self.requires_clarification,
             "doc_types": self.doc_types,
+            "conv_kind": self.conv_kind.value if self.conv_kind else None,
         }
 
 
 # Patterns are ordered by specificity: the first list to match wins, so
 # narrower intents (sales, support, partnership) are checked before the broad
 # knowledge intents.
+# Small talk is NOT here: conversational detection lives in
+# company_conversational.py (regex fast-path + semantic detector) and runs in
+# CompanyIntentClassifier.classify with its own precedence rules.
 _PATTERNS: List[Tuple[CompanyIntent, CompanyCategory, List[str]]] = [
-    (CompanyIntent.CONVERSATIONAL, CompanyCategory.CONVERSATIONAL, [
-        r'^\s*(hi|hii+|hey|hello|yo|namaste|good\s+(morning|afternoon|evening))\b',
-        r'^\s*(thanks|thank\s+you|thx|ty|cheers)\b',
-        r'^\s*(bye|goodbye|see\s+you|good\s*night)\b',
-        r'^\s*(ok|okay|cool|nice|great|awesome|got\s+it)\s*[.!]?\s*$',
-        r'\bhow\s+are\s+you\b',
-    ]),
     (CompanyIntent.IDENTITY, CompanyCategory.KNOWLEDGE, [
         r'\bwho\s+are\s+you\b',
         r'\bwhat\s+are\s+you\b',
@@ -106,6 +117,7 @@ _PATTERNS: List[Tuple[CompanyIntent, CompanyCategory, List[str]]] = [
         r'\bwhy\s+.*\bname\b',
         r'\bname\s+(origin|meaning)\b',
         r'\bwhat\s+can\s+you\s+do\b',
+        r'\bhow\s+are\s+you\s+(useful|helpful|different|better)\b',
     ]),
     (CompanyIntent.SALES, CompanyCategory.KNOWLEDGE, [
         r'\b(price|pricing|cost|quote|quotation|how\s+much)\b',
@@ -171,11 +183,28 @@ _PATTERNS: List[Tuple[CompanyIntent, CompanyCategory, List[str]]] = [
 
 
 class CompanyIntentClassifier:
-    def __init__(self):
+    """Classifies a query into a company intent.
+
+    Conversational detection is layered ahead of / around the knowledge
+    patterns (see company_conversational.py):
+
+      1. Semantic verdict with a high score on a short message wins outright,
+         even if it contains a knowledge keyword ("cool robots!").
+      2. An explicit knowledge pattern beats a moderate semantic score — this
+         is what keeps "how are you useful?" a capabilities question.
+      3. Semantic verdict with a decent score AND a clear margin over the
+         runner-up kind ("laterz", "gotta run").
+      4. Regex fast-path (canonical utterances; also the fallback when the
+         embedding backend is unavailable).
+      5. Nothing matched → UNKNOWN, and the KB is searched anyway.
+    """
+
+    def __init__(self, embed_fn: Optional[Callable[[str], List[float]]] = None):
         self._compiled = [
             (intent, category, [re.compile(p, re.IGNORECASE) for p in patterns])
             for intent, category, patterns in _PATTERNS
         ]
+        self.detector = ConversationalDetector(embed_fn) if embed_fn else None
 
     def classify(self, query: str) -> CompanyIntentResult:
         text = (query or "").strip()
@@ -185,37 +214,62 @@ class CompanyIntentClassifier:
                 requires_clarification=True,
             )
 
+        hit = self.detector.detect(text) if self.detector else None
+
+        # Rule 1 — unambiguous chitchat in a short message wins outright.
+        if hit and hit.score >= HIGH_TAU and len(text.split()) <= SHORT_QUERY_WORDS:
+            return self._conversational_result(hit)
+
+        # Rule 2 — explicit knowledge patterns.
         scores: Dict[CompanyIntent, Tuple[int, CompanyCategory]] = {}
         for intent, category, patterns in self._compiled:
             hits = sum(1 for p in patterns if p.search(text))
             if hits:
                 scores[intent] = (hits, category)
+        if scores:
+            # Highest hit count wins; ties break toward the earlier (more
+            # specific) pattern group, which is the order _PATTERNS is declared in.
+            order = {intent: i for i, (intent, _, _) in enumerate(self._compiled)}
+            best = min(scores.items(), key=lambda kv: (-kv[1][0], order[kv[0]]))
+            intent, (hits, category) = best
+            confidence = min(0.95, 0.55 + 0.15 * hits)
+            return CompanyIntentResult(intent, confidence, category,
+                                       {"matched_patterns": hits})
 
-        if not scores:
-            # No pattern matched — still search the KB, the embedding model is
-            # better at open-ended phrasing than these rules are.
-            return CompanyIntentResult(
-                CompanyIntent.UNKNOWN, 0.3, CompanyCategory.KNOWLEDGE,
-                requires_clarification=False,
-            )
+        # Rule 3 — semantic chitchat with a clear margin.
+        if hit and hit.score >= ACCEPT_TAU and hit.margin >= MARGIN:
+            return self._conversational_result(hit)
 
-        # Highest hit count wins; ties break toward the earlier (more specific)
-        # pattern group, which is the order _PATTERNS is declared in.
-        order = {intent: i for i, (intent, _, _) in enumerate(self._compiled)}
-        best = min(scores.items(), key=lambda kv: (-kv[1][0], order[kv[0]]))
-        intent, (hits, category) = best
+        # Rule 4 — regex fast-path (also covers the detector being unavailable).
+        kind = fast_detect(text)
+        if kind:
+            return self._conversational_result(ConvHit(kind, 0.0, 0.0))
 
-        confidence = min(0.95, 0.55 + 0.15 * hits)
-        entities = {"matched_patterns": hits}
+        # Rule 5 — no pattern matched — still search the KB, the embedding
+        # model is better at open-ended phrasing than these rules are.
+        return CompanyIntentResult(
+            CompanyIntent.UNKNOWN, 0.3, CompanyCategory.KNOWLEDGE,
+            requires_clarification=False,
+        )
 
-        return CompanyIntentResult(intent, confidence, category, entities)
+    @staticmethod
+    def _conversational_result(hit: ConvHit) -> CompanyIntentResult:
+        confidence = min(0.95, max(0.6, hit.score)) if hit.score else 0.6
+        return CompanyIntentResult(
+            CompanyIntent.CONVERSATIONAL, confidence, CompanyCategory.CONVERSATIONAL,
+            conv_kind=hit.kind,
+        )
 
 
 _classifier: Optional[CompanyIntentClassifier] = None
 
 
-def get_company_intent_classifier() -> CompanyIntentClassifier:
+def get_company_intent_classifier(
+    embed_fn: Optional[Callable[[str], List[float]]] = None,
+) -> CompanyIntentClassifier:
+    """Singleton accessor. The FIRST caller decides whether the semantic
+    detector exists by passing (or omitting) `embed_fn`."""
     global _classifier
     if _classifier is None:
-        _classifier = CompanyIntentClassifier()
+        _classifier = CompanyIntentClassifier(embed_fn=embed_fn)
     return _classifier

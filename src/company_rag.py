@@ -14,9 +14,11 @@ metadata ever reappears in the store.
 
 from __future__ import annotations
 
+import os
 import re
 from typing import Dict, List, Optional
 
+from company_conversational import CompanyConvKind
 from company_intents import (
     CompanyCategory,
     CompanyIntent,
@@ -33,6 +35,34 @@ MIN_HITS_BEFORE_BROADENING = 3
 # retrieve the same fact twice in different wording. Above this token overlap
 # the lower-ranked copy is dropped, keeping the context window for new facts.
 DUPLICATE_OVERLAP_THRESHOLD = 0.72
+
+# Conversational turns are short and benefit from variety — looser than the
+# knowledge settings (max_tokens 500 / temperature 0.3).
+_CONV_MAX_TOKENS = int(os.getenv("CONV_MAX_TOKENS", "100"))
+_CONV_TEMPERATURE = float(os.getenv("CONV_TEMPERATURE", "0.7"))
+
+# Dedicated minimal system prompt: chitchat needs the persona, not the
+# "answer from the sources" machinery the knowledge prompt carries.
+CONVERSATIONAL_SYSTEM_PROMPT = (
+    "You are Chikku, the friendly virtual assistant for Chikku Robotics."
+)
+
+# Canned replies are the degraded mode ONLY: used for the first message of a
+# session and whenever the LLM fails. Kept in English; localize() translates
+# them (cached) on the way out.
+CONVERSATIONAL_FALLBACKS: Dict[CompanyConvKind, str] = {
+    CompanyConvKind.GREETING: "Hello again! What can I help you with today?",
+    CompanyConvKind.THANKS: "You're very welcome! Anything else I can help you with?",
+    CompanyConvKind.FAREWELL: (
+        "Goodbye! 👋 Feel free to come back anytime — I'm here whenever you need "
+        "anything about Chikku Robotics."
+    ),
+    CompanyConvKind.HOW_ARE_YOU: (
+        "I'm doing great, thanks for asking! 🤖 Ready to help with anything "
+        "Chikku Robotics — what would you like to know?"
+    ),
+    CompanyConvKind.ACK: "Happy to help! What would you like to know about Chikku Robotics?",
+}
 
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
@@ -76,7 +106,11 @@ class CompanyRAG:
     def __init__(self, pipeline):
         self.p = pipeline                       # the owning RAGPipeline
         self.tenant = pipeline.tenant
-        self.classifier = get_company_intent_classifier()
+        # Pass the pipeline's embedding getter so conversational detection
+        # shares the embedding cache and adds no extra model calls. The
+        # prototype warm-up itself starts at the END of RAGPipeline.__init__,
+        # once the pipeline is safe to use from another thread.
+        self.classifier = get_company_intent_classifier(self.p.get_embedding)
 
     # ------------------------------------------------------------ retrieval
 
@@ -132,6 +166,131 @@ class CompanyRAG:
             "I can help you with our **products**, **industry solutions**, **services**, "
             "**technology**, and **partnerships**. What would you like to know?"
         )
+
+    # ------------------------------------------------------- conversational
+
+    def _conversational_turn(
+        self,
+        query: str,
+        intent: CompanyIntentResult,
+        conversation_history: Optional[List[Dict]],
+        language: Optional[str],
+    ) -> Dict:
+        """Small-talk turn: LLM-generated reply, canned fallbacks on failure.
+
+        The first message of a session stays the canned brand intro so the
+        welcome is consistent; everything after that is generated.
+        """
+        if not conversation_history:
+            response = self.welcome_message()
+        else:
+            response = self.generate_conversational(query, intent, conversation_history, language)
+        return {
+            "query": query,
+            "response": response,
+            "items": [],
+            "retrieved_count": 0,
+            "intent": intent.to_dict(),
+        }
+
+    def _fallback_reply(self, intent: CompanyIntentResult) -> str:
+        kind = intent.conv_kind or CompanyConvKind.ACK
+        return CONVERSATIONAL_FALLBACKS[kind]
+
+    def build_conversational_prompt(
+        self,
+        query: str,
+        intent: CompanyIntentResult,
+        conversation_history: Optional[List[Dict]] = None,
+        language: Optional[str] = None,
+    ) -> str:
+        kind = intent.conv_kind.value if intent.conv_kind else "casual"
+        tone = (
+            "This is the first message of the session — open with a one-line "
+            "self-introduction."
+            if not conversation_history
+            else "You have already introduced yourself — do NOT reintroduce."
+        )
+        history_block = ""
+        if conversation_history:
+            lines = [
+                f"{m.get('role', 'user')}: {m.get('content', '')}"
+                for m in conversation_history[-4:]
+            ]
+            history_block = "Recent conversation:\n" + "\n".join(lines) + "\n"
+
+        return f"""This is a CONVERSATIONAL turn from the customer, not a product question.
+Detected tone: {kind.replace('_', ' ')}. {tone}
+{history_block}
+Rules:
+1. Reply in 1-3 short sentences and match the customer's tone and energy.
+2. A goodbye deserves a warm goodbye; thanks deserves gracious acceptance.
+3. Do NOT pitch products, prices, or capabilities unless directly asked.
+4. Never invent facts about the company.
+
+Customer says: {query}
+
+Reply as Chikku.""" + answer_language_directive(language)
+
+    def _conversational_messages(
+        self,
+        query: str,
+        intent: CompanyIntentResult,
+        conversation_history: Optional[List[Dict]],
+        language: Optional[str],
+    ) -> List[Dict]:
+        messages = [{"role": "system", "content": CONVERSATIONAL_SYSTEM_PROMPT}]
+        for msg in (conversation_history or [])[-4:]:
+            if msg.get("role") in ("user", "assistant"):
+                messages.append({"role": msg["role"], "content": msg.get("content", "")})
+        messages.append({
+            "role": "user",
+            "content": self.build_conversational_prompt(query, intent, conversation_history, language),
+        })
+        return messages
+
+    def generate_conversational(
+        self,
+        query: str,
+        intent: CompanyIntentResult,
+        conversation_history: Optional[List[Dict]] = None,
+        language: Optional[str] = None,
+    ) -> str:
+        """LLM-generated small-talk reply; canned fallback on any failure."""
+        messages = self._conversational_messages(query, intent, conversation_history, language)
+        options = {"max_tokens": _CONV_MAX_TOKENS, "temperature": _CONV_TEMPERATURE, "top_p": 0.9}
+        try:
+            result = self.p.provider.chat(messages, options)
+        except Exception as e:
+            print(f"❌ LLM error (conversational): {e}")
+            return self._fallback_reply(intent)
+
+        if not result or not result.strip():
+            return self._fallback_reply(intent)
+
+        validator = get_validator()
+        validation = validator.validate(result, query=query, context_provided=False, language=language)
+        if not validation["valid"]:
+            print(f"⚠️  Conversational response validation failed (score: {validation['score']:.2f})")
+            if validator.enabled:
+                return validation["cleaned_response"]
+        return result
+
+    def stream_conversational(
+        self,
+        query: str,
+        intent: CompanyIntentResult,
+        conversation_history: Optional[List[Dict]] = None,
+        language: Optional[str] = None,
+    ):
+        messages = self._conversational_messages(query, intent, conversation_history, language)
+        options = {"max_tokens": _CONV_MAX_TOKENS, "temperature": _CONV_TEMPERATURE, "top_p": 0.9}
+        try:
+            yield from self.p.provider.stream_chat(messages, options)
+        except Exception as e:
+            print(f"❌ LLM streaming error (conversational): {e}")
+            # Nothing downstream localizes a streamed chunk, so do it here.
+            yield localize(self.p.provider, self._fallback_reply(intent), language)
 
     def _intent_guidance(self, intent: CompanyIntentResult) -> str:
         guidance = {
@@ -342,20 +501,10 @@ Answer as Chikku, using only the information above.""" + answer_language_directi
         print(f"📋 Intent: {intent.intent_type.value} ({intent.category.value}, "
               f"confidence {intent.confidence:.2f})")
 
-        # Pure small talk needs no retrieval.
+        # Small talk needs no retrieval — the LLM chats, the fallbacks catch
+        # failures (see _conversational_turn).
         if intent.category == CompanyCategory.CONVERSATIONAL:
-            response = (
-                self.welcome_message()
-                if not conversation_history
-                else "Happy to help! What would you like to know about Chikku Robotics?"
-            )
-            return {
-                "query": user_query,
-                "response": response,
-                "items": [],
-                "retrieved_count": 0,
-                "intent": intent.to_dict(),
-            }
+            return self._conversational_turn(user_query, intent, conversation_history, language)
 
         print(f"📥 Retrieving top {top_k} (doc_types={intent.doc_types or 'any'})")
         retrieved = self.retrieve(user_query, intent, top_k)

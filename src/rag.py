@@ -190,7 +190,12 @@ class RAGPipeline:
         self.embedding_cache_max_size = max(50, int(os.getenv("EMBEDDING_CACHE_MAX_SIZE", "200")))
         # key: query_text -> List[float]
         self._embedding_cache: "OrderedDict[str, List[float]]" = OrderedDict()
-    
+
+        # Pipeline is fully built here — safe to start background warm-up of
+        # the conversational detector's prototype embeddings (company tenant).
+        if self.company and self.company.classifier.detector:
+            self.company.classifier.detector.warmup_async()
+
     def get_embedding(self, text: str) -> List[float]:
         """Get embedding for text (with caching)"""
         # Normalize text for cache key
@@ -644,14 +649,15 @@ CRITICAL: Only show this welcome message ONCE at the very beginning of a new con
         if self.company:
             intent = self.company.classifier.classify(query)
             if intent.category.value == "conversational" and not context:
-                canned = (
-                    self.company.welcome_message()
-                    if not conversation_history
-                    else "Happy to help! What would you like to know about Chikku Robotics?"
-                )
-                # Canned text bypasses the LLM, so the answer directive cannot
-                # do the work — translate it (cached) before it is streamed.
-                yield localize(self.provider, canned, language)
+                if not conversation_history:
+                    # Canned brand intro, first turn only. It bypasses the LLM,
+                    # so the answer directive cannot do the work — translate it
+                    # (cached) before it is streamed.
+                    yield localize(self.provider, self.company.welcome_message(), language)
+                    return
+                # Later chitchat turns are LLM-generated and answer natively
+                # via the language directive; fallbacks handled inside.
+                yield from self.company.stream_conversational(query, intent, conversation_history, language)
                 return
             yield from self.company.stream(query, context, intent, conversation_history, language)
             return
