@@ -1,7 +1,7 @@
 {
   "collection": "chikku_kb",
   "company": "Chikku Robotics",
-  "total_chunks": 559,
+  "total_chunks": 330,
   "counts_by_doc_type": {
     "company": 7,
     "faq": 33,
@@ -11,17 +11,15 @@
     "product": 8,
     "service": 26,
     "solution": 25,
-    "techdoc": 229,
     "technology": 25
   },
   "counts_by_source_format": {
     "json": 133,
-    "pdf": 197,
-    "markdown": 229
+    "pdf": 197
   },
   "counts_by_audience": {
     "customer": 330,
-    "internal": 229
+    "internal": 0
   },
   "embedding_model": "mxbai-embed-large",
   "embedding_dim": 1024,
@@ -29,12 +27,12 @@
   "max_chunk_chars": 1100,
   "chunk_overlap": 120,
   "metadata_schema": {
-    "doc_type": "identity | company | partnership | product | service | solution | technology | faq | techdoc",
+    "doc_type": "identity | company | partnership | product | service | solution | technology | faq",
     "category": "section key within the source file (e.g. healthcare, safety_systems, training)",
     "category_title": "human-readable section title",
     "title": "chunk title",
     "entity": "named product / partner / person / program, empty when not applicable",
-    "audience": "customer (public-facing) | internal (engineering docs)",
+    "audience": "customer (public-facing); the corpus no longer contains internal docs",
     "source_file": "originating file inside data/Chikku-conpany-data",
     "keywords": "pipe-separated search aids",
     "company": "constant: Chikku Robotics",
@@ -46,14 +44,13 @@
     "chikku_kb.jsonl": "all chunks, one JSON record per line (canonical)",
     "chikku_kb.json": "same records as a single JSON array",
     "chikku_kb.csv": "flat tabular export, metadata as columns",
-    "chikku_kb.customer.jsonl": "public-facing subset only",
-    "chikku_kb.internal.jsonl": "internal technical docs only",
+    "chikku_kb.customer.jsonl": "public-facing subset",
     "by_doc_type/*.jsonl": "one file per doc_type",
     "chikku_kb.embeddings.jsonl": "records with pre-computed embedding vectors"
   },
   "notes": [
     "Metadata values are scalars only (lists are pipe-joined) for Chroma compatibility.",
     "Chunk ids are deterministic, so re-uploading upserts instead of duplicating.",
-    "Filter with audience='customer' for the support bot; internal docs stay out of customer answers."
+    "Retrieval always filters audience='customer'; the corpus contains no internal docs."
   ]
 }

@@ -8,7 +8,10 @@ Builds a SEPARATE vector store from the hotel one:
 Source: data/Chikku-conpany-data/
     *.json              structured company data      (audience=customer)
     *.pdf               designed report renderings   (audience=customer, source_format=pdf)
-    Chikku_docs/*.md    internal engineering docs    (audience=internal, --include-docs)
+
+The developer-facing markdown docs in Chikku_docs/ are deliberately NOT
+indexed: they describe the source code and must never surface in customer
+answers. (Historically this was behind --include-docs; removed 2026-09.)
 
 Chunking is structure-aware: each JSON file has its own splitter so a chunk is
 one semantically complete unit (one product, one FAQ pair, one capability),
@@ -18,10 +21,9 @@ Chunk ids are deterministic (`doc_type:category:slug`) so re-running upserts
 instead of duplicating.
 
 Usage:
-    python src/ingest_chikku.py                             # JSON + PDFs
-    python src/ingest_chikku.py --include-docs              # + internal markdown docs
-    python src/ingest_chikku.py --include-docs --reset      # full rebuild
-    python src/ingest_chikku.py --no-pdfs                   # structured JSON only
+    python src/ingest_chikku.py                 # JSON + PDFs
+    python src/ingest_chikku.py --reset         # full rebuild
+    python src/ingest_chikku.py --no-pdfs       # structured JSON only
 """
 
 from __future__ import annotations
@@ -480,37 +482,6 @@ def chunk_pdfs(data_dir: Path) -> List[Chunk]:
     return out
 
 
-def chunk_markdown_docs(docs_dir: Path) -> List[Chunk]:
-    """Split each markdown doc on `##` headings. Tagged audience=internal."""
-    out: List[Chunk] = []
-    for path in sorted(docs_dir.glob("*.md")):
-        raw = path.read_text(encoding="utf-8")
-        sections = re.split(r"^(#{1,3})\s+(.+)$", raw, flags=re.MULTILINE)
-        # sections = [preamble, hashes, heading, body, hashes, heading, body, ...]
-        blocks = []
-        if sections[0].strip():
-            blocks.append((path.stem, "", sections[0]))
-        for i in range(1, len(sections), 3):
-            blocks.append((sections[i + 1].strip(), sections[i], sections[i + 2]))
-
-        for n, (heading, hashes, body) in enumerate(blocks):
-            body = body.strip()
-            # Reproduce the heading line as written ("## Setup"), so the source
-            # text is present verbatim and nothing is lost to formatting.
-            heading_line = f"{hashes} {heading}".strip() if hashes else heading
-            # oversized sections are split later by split_oversized()
-            out.append(make_chunk(
-                "techdoc", path.stem, heading,
-                f"{path.stem} — {heading_line}\n{body}",
-                f"Chikku_docs/{path.name}",
-                category_title=path.stem.replace("-", " ").title(),
-                entity=heading, audience="internal",
-                keywords=["documentation", path.stem, heading],
-                source_format="markdown",
-            ))
-    return out
-
-
 # ---------------------------------------------------------------- indexing
 
 def split_on_lines(body: str, window: int) -> List[str]:
@@ -600,7 +571,7 @@ def split_oversized(chunks: List[Chunk]) -> List[Chunk]:
     return out
 
 
-def build_chunks(data_dir: Path, include_docs: bool, include_pdfs: bool = True) -> List[Chunk]:
+def build_chunks(data_dir: Path, include_pdfs: bool = True) -> List[Chunk]:
     chunks: List[Chunk] = []
     chunks += chunk_identity(data_dir)
     chunks += chunk_company_overview(data_dir)
@@ -612,10 +583,6 @@ def build_chunks(data_dir: Path, include_docs: bool, include_pdfs: bool = True) 
     chunks += chunk_faq(data_dir)
     if include_pdfs:
         chunks += chunk_pdfs(data_dir)
-    if include_docs:
-        docs_dir = data_dir / "Chikku_docs"
-        if docs_dir.exists():
-            chunks += chunk_markdown_docs(docs_dir)
 
     chunks = split_oversized(chunks)
 
@@ -707,7 +674,7 @@ def export_chunks(chunks: List[Chunk], out_dir: Path, vectors: List[List[float]]
         "counts_by_doc_type": {k: len(v) for k, v in sorted(by_type.items())},
         "counts_by_source_format": {
             fmt: sum(1 for r in records if r["metadata"].get("source_format") == fmt)
-            for fmt in ("json", "pdf", "markdown")
+            for fmt in ("json", "pdf")
         },
         "counts_by_audience": {
             a: sum(1 for r in records if r["metadata"]["audience"] == a)
@@ -719,12 +686,12 @@ def export_chunks(chunks: List[Chunk], out_dir: Path, vectors: List[List[float]]
         "max_chunk_chars": MAX_CHUNK_CHARS,
         "chunk_overlap": CHUNK_OVERLAP,
         "metadata_schema": {
-            "doc_type": "identity | company | partnership | product | service | solution | technology | faq | techdoc",
+            "doc_type": "identity | company | partnership | product | service | solution | technology | faq",
             "category": "section key within the source file (e.g. healthcare, safety_systems, training)",
             "category_title": "human-readable section title",
             "title": "chunk title",
             "entity": "named product / partner / person / program, empty when not applicable",
-            "audience": "customer (public-facing) | internal (engineering docs)",
+            "audience": "customer (public-facing); the corpus no longer contains internal docs",
             "source_file": "originating file inside data/Chikku-conpany-data",
             "keywords": "pipe-separated search aids",
             "company": "constant: Chikku Robotics",
@@ -736,15 +703,14 @@ def export_chunks(chunks: List[Chunk], out_dir: Path, vectors: List[List[float]]
             "chikku_kb.jsonl": "all chunks, one JSON record per line (canonical)",
             "chikku_kb.json": "same records as a single JSON array",
             "chikku_kb.csv": "flat tabular export, metadata as columns",
-            "chikku_kb.customer.jsonl": "public-facing subset only",
-            "chikku_kb.internal.jsonl": "internal technical docs only",
+            "chikku_kb.customer.jsonl": "public-facing subset",
             "by_doc_type/*.jsonl": "one file per doc_type",
             "chikku_kb.embeddings.jsonl": "records with pre-computed embedding vectors",
         },
         "notes": [
             "Metadata values are scalars only (lists are pipe-joined) for Chroma compatibility.",
             "Chunk ids are deterministic, so re-uploading upserts instead of duplicating.",
-            "Filter with audience='customer' for the support bot; internal docs stay out of customer answers.",
+            "Retrieval always filters audience='customer'; the corpus contains no internal docs.",
         ],
     }
     with open(out_dir / "manifest.json", "w", encoding="utf-8") as f:
@@ -760,7 +726,6 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Index Chikku Robotics KB into ChromaDB")
     parser.add_argument("--chroma-dir", default=None, help="defaults to <root>/chikku_db")
     parser.add_argument("--data-dir", default=None, help="defaults to <root>/data/Chikku-conpany-data")
-    parser.add_argument("--include-docs", action="store_true", help="also index Chikku_docs/*.md (audience=internal)")
     parser.add_argument("--no-pdfs", action="store_true", help="skip the PDF reports (indexed by default)")
     parser.add_argument("--reset", action="store_true", help="delete the collection before indexing")
     parser.add_argument("--dry-run", action="store_true", help="print chunk plan, no embeddings")
@@ -776,7 +741,7 @@ def main() -> None:
     if not data_dir.exists():
         raise SystemExit(f"data dir not found: {data_dir}")
 
-    chunks = build_chunks(data_dir, args.include_docs, not args.no_pdfs)
+    chunks = build_chunks(data_dir, not args.no_pdfs)
 
     counts: Dict[str, int] = {}
     for c in chunks:

@@ -7,7 +7,6 @@ actually make it into the vector store?
 For each source file it enumerates the atomic units of content —
 
     *.json  every leaf value in the object tree
-    *.md    every non-empty line
     *.pdf   every non-empty extracted line
 
 — then checks each one appears in the indexed text for that same file. Anything
@@ -70,12 +69,6 @@ def source_fragments(root: Path) -> Dict[str, List[str]]:
         with pdfplumber.open(path) as pdf:
             text = "\n".join((p.extract_text() or "") for p in pdf.pages)
         out[path.name] = [l for l in text.splitlines() if l.strip()]
-
-    docs = root / "Chikku_docs"
-    if docs.exists():
-        for path in sorted(docs.glob("*.md")):
-            lines = path.read_text(encoding="utf-8").splitlines()
-            out[f"Chikku_docs/{path.name}"] = [l for l in lines if l.strip()]
 
     return out
 

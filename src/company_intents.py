@@ -51,15 +51,11 @@ INTENT_DOC_TYPES: Dict[CompanyIntent, List[str]] = {
     CompanyIntent.SOLUTION: ["solution", "product", "faq", "pdfreport"],
     CompanyIntent.TECHNOLOGY: ["technology", "product", "faq", "pdfreport"],
     CompanyIntent.PARTNERSHIP: ["partnership", "faq", "pdfreport"],
-    CompanyIntent.SUPPORT: ["techdoc", "service", "faq", "pdfreport"],
+    CompanyIntent.SUPPORT: ["service", "faq", "pdfreport"],
     CompanyIntent.SALES: ["faq", "service", "product", "pdfreport"],
     CompanyIntent.CONVERSATIONAL: [],
     CompanyIntent.UNKNOWN: [],
 }
-
-# SUPPORT is the only intent allowed to read the internal engineering docs.
-INTENTS_ALLOWING_INTERNAL = {CompanyIntent.SUPPORT}
-
 
 @dataclass
 class CompanyIntentResult:
@@ -75,10 +71,6 @@ class CompanyIntentResult:
     @property
     def doc_types(self) -> List[str]:
         return INTENT_DOC_TYPES.get(self.intent_type, [])
-
-    @property
-    def allows_internal(self) -> bool:
-        return self.intent_type in INTENTS_ALLOWING_INTERNAL
 
     def is_conversational(self) -> bool:
         return self.category == CompanyCategory.CONVERSATIONAL

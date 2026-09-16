@@ -129,8 +129,9 @@ Individual fields can be overridden with `CHROMA_DIR`, `COLLECTION_NAME` and
   and the restaurant knowledge base for hours/location/policies.
 - `chikku` (`domain=company`) runs `src/company_rag.py`: a B2B support taxonomy
   (product, solution, service, technology, partnership, sales, support, company info),
-  metadata-scoped retrieval by `doc_type`, and an `audience` gate so internal
-  engineering docs are only readable by support-intent questions.
+  metadata-scoped retrieval by `doc_type`, and a constant `audience='customer'`
+  filter on every lookup. The developer-facing docs in `Chikku_docs/` are not
+  indexed at all, so source-code material can never surface in answers.
 
 The response validator is tenant-aware too. Its default rules ban phrases like
 "machine learning" and "artificial intelligence" as persona leaks — correct for a

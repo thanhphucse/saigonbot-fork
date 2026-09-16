@@ -43,8 +43,6 @@ class TenantConfig:
     system_prompt_file: str
     assistant_name: str = "Chikku"
     api_title: str = "Chatbot API"
-    # Metadata filter applied to every retrieval (None = no filter).
-    retrieval_where: Optional[Dict] = None
     # Terms the response validator must NOT strip for this tenant.
     validator_allow: tuple = field(default_factory=tuple)
 
@@ -85,9 +83,6 @@ TENANTS: Dict[str, TenantConfig] = {
         system_prompt_file="data/chikku_system_prompt.txt",
         assistant_name="Chikku",
         api_title="Chikku Robotics Support API",
-        # Internal engineering docs stay out of customer answers by default;
-        # the support intent widens this at query time.
-        retrieval_where={"audience": "customer"},
         # Chikku Robotics is an AI/robotics company: these terms are legitimate
         # product vocabulary and must survive response cleaning.
         validator_allow=(

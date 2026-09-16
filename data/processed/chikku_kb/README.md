@@ -3,30 +3,31 @@
 Vendor-neutral RAG payload generated from `data/Chikku-conpany-data/`.
 Every record is a ready-to-upload chunk: stable id, embedding text, and full metadata.
 
-**All 24 source files are indexed** — 8 JSON, 8 PDF, 8 internal markdown docs — into
-559 chunks. Coverage is verified: `python src/audit_chikku_coverage.py` checks every
-JSON leaf value and every non-empty PDF/markdown line against the store and reports
-99.97% (the single exception is one 1217-character SRS table row, longer than the
-embedding model's context, which is stored split across two overlapping chunks).
+**All 16 source files are indexed** — 8 JSON + 8 PDF — into 330 chunks, all
+`audience=customer`. Coverage is verified: `python src/audit_chikku_coverage.py`
+checks every JSON leaf value and every non-empty PDF line against the store.
+
+The developer-facing markdown docs in `data/Chikku-conpany-data/Chikku_docs/`
+are **deliberately not indexed**: they describe the source code and must never
+surface in customer answers.
 
 Regenerate with:
 
 ```bash
-python src/ingest_chikku.py --include-docs --reset          # index + export
-python src/ingest_chikku.py --include-docs --export-only    # export only
-python src/ingest_chikku.py --include-docs --export-only --no-embeddings
+python src/ingest_chikku.py --reset          # index + export
+python src/ingest_chikku.py --export-only    # export only
+python src/ingest_chikku.py --export-only --no-embeddings
 ```
 
 ## Contents
 
 | File | What it is |
 |---|---|
-| `chikku_kb.jsonl` | **Canonical.** All 559 chunks, one JSON record per line |
+| `chikku_kb.jsonl` | **Canonical.** All 330 chunks, one JSON record per line |
 | `chikku_kb.json` | Same records as a single JSON array |
 | `chikku_kb.csv` | Flat table, metadata as columns — for tools that only take CSV |
 | `chikku_kb.embeddings.jsonl` | Records **plus** 1024-d vectors — upload without an embedding model |
-| `chikku_kb.customer.jsonl` | Public-facing subset — JSON + PDF (330 chunks) |
-| `chikku_kb.internal.jsonl` | Internal engineering docs (229 chunks) |
+| `chikku_kb.customer.jsonl` | The whole corpus (all chunks are customer-facing) |
 | `by_doc_type/*.jsonl` | One file per `doc_type` — load only FAQ, only products, etc. |
 | `manifest.json` | Counts, schema, embedding model, chunking parameters |
 
@@ -57,16 +58,16 @@ python src/ingest_chikku.py --include-docs --export-only --no-embeddings
 
 | Field | Meaning |
 |---|---|
-| `doc_type` | `identity`, `company`, `partnership`, `product`, `service`, `solution`, `technology`, `faq`, `pdfreport`, `techdoc` |
+| `doc_type` | `identity`, `company`, `partnership`, `product`, `service`, `solution`, `technology`, `faq`, `pdfreport` |
 | `category` | Section key inside the source file (`healthcare`, `safety_systems`, `training`, …) |
 | `category_title` | Human-readable section title |
 | `title` | Chunk title |
 | `entity` | Named product / partner / person / program; empty when not applicable |
-| `audience` | `customer` (public-facing) or `internal` (engineering docs) |
+| `audience` | Constant `customer` (no internal docs in this corpus) |
 | `source_file` | Originating file inside `data/Chikku-conpany-data` |
 | `keywords` | Pipe-separated search aids |
 | `company` | Constant `Chikku Robotics` |
-| `source_format` | `json` \| `pdf` \| `markdown` — how the chunk was extracted |
+| `source_format` | `json` \| `pdf` — how the chunk was extracted |
 | `char_len` | Length of the chunk text |
 | `part_index` / `part_total` | Set when a long chunk was split across parts |
 
@@ -77,7 +78,6 @@ list-valued metadata. Split on `" | "` if your store supports arrays.
 
 | doc_type | count | from |
 |---|---|---|
-| techdoc | 229 | `Chikku_docs/*.md` (internal) |
 | pdfreport | 197 | `*.pdf` |
 | faq | 33 | `faq.json` |
 | service | 26 | `services.json` |
@@ -87,10 +87,10 @@ list-valued metadata. Split on `" | "` if your store supports arrays.
 | company | 7 | `company_overview.json` |
 | identity | 5 | `identity.json` |
 | partnership | 4 | `partnerships.json` |
-| **total** | **559** | 24 files |
+| **total** | **330** | 16 files |
 
-By source format: json 133 · pdf 197 · markdown 229
-By audience: customer 330 · internal 229
+By source format: json 133 · pdf 197
+By audience: customer 330
 
 ## Uploading
 

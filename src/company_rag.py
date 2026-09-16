@@ -7,8 +7,9 @@ validator, but replaces everything that is restaurant-shaped: intent taxonomy,
 metadata-aware context formatting, prompts, and fallbacks.
 
 Retrieval is metadata-driven. The intent picks a set of `doc_type` values, and
-`audience` gates the internal engineering docs — only the SUPPORT intent may
-read them.
+every lookup filters audience='customer' — the corpus contains no internal
+engineering docs, and this constant filter keeps it that way even if stray
+metadata ever reappears in the store.
 """
 
 from __future__ import annotations
@@ -80,17 +81,13 @@ class CompanyRAG:
     # ------------------------------------------------------------ retrieval
 
     def _build_where(self, intent: CompanyIntentResult, use_doc_types: bool) -> Optional[Dict]:
-        clauses: List[Dict] = []
-
-        # Internal engineering docs are only visible to support-style questions.
-        if not intent.allows_internal:
-            clauses.append({"audience": "customer"})
+        # audience='customer' is unconditional: internal docs are not part of
+        # this corpus, and the filter guards against any stray ones returning.
+        clauses: List[Dict] = [{"audience": "customer"}]
 
         if use_doc_types and intent.doc_types:
             clauses.append({"doc_type": {"$in": intent.doc_types}})
 
-        if not clauses:
-            return None
         if len(clauses) == 1:
             return clauses[0]
         return {"$and": clauses}
@@ -360,8 +357,7 @@ Answer as Chikku, using only the information above.""" + answer_language_directi
                 "intent": intent.to_dict(),
             }
 
-        print(f"📥 Retrieving top {top_k} (doc_types={intent.doc_types or 'any'}, "
-              f"internal={'yes' if intent.allows_internal else 'no'})")
+        print(f"📥 Retrieving top {top_k} (doc_types={intent.doc_types or 'any'})")
         retrieved = self.retrieve(user_query, intent, top_k)
         print(f"✅ Retrieved {len(retrieved)} chunks")
 
