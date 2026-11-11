@@ -614,10 +614,16 @@ async def get_stats():
 
 def main():
     """Run the API server"""
+    host = (os.getenv("API_HOST") or "0.0.0.0").strip() or "0.0.0.0"
+    raw_port = (os.getenv("API_PORT") or "8000").strip() or "8000"
+    try:
+        port = int(raw_port)
+    except ValueError as exc:
+        raise SystemExit(f"Invalid API_PORT={raw_port!r}: must be an integer") from exc
     uvicorn.run(
         "api:app",
-        host="0.0.0.0",
-        port=8000,
+        host=host,
+        port=port,
         reload=True
     )
 

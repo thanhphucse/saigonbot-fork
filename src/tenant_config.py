@@ -108,7 +108,7 @@ def get_tenant() -> TenantConfig:
     if _tenant is not None:
         return _tenant
 
-    name = os.getenv("TENANT", "saigon").strip().lower()
+    name = (os.getenv("TENANT") or "chikku").strip().lower()
     if name not in TENANTS:
         raise SystemExit(
             f"Unknown TENANT={name!r}. Valid values: {', '.join(sorted(TENANTS))}"

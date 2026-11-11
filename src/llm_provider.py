@@ -148,20 +148,25 @@ def get_provider() -> LLMProvider:
 
     Embeddings always use Ollama (EMBEDDING_MODEL).
     Generation uses LLM_PROVIDER:
-      - ollama  → OllamaProvider       (local, default)
-      - openai  → OpenAIGenerationProvider (OpenAI chat + Ollama embeddings)
+      - openai  → OpenAIGenerationProvider (OpenAI chat + Ollama embeddings, default)
+      - ollama  → OllamaProvider           (local Ollama chat + embeddings)
     """
-    provider_name   = os.getenv("LLM_PROVIDER", "ollama").lower().strip()
-    embedding_model = os.getenv("EMBEDDING_MODEL", "mxbai-embed-large")
+    provider_name   = (os.getenv("LLM_PROVIDER") or "openai").lower().strip()
+    embedding_model = (os.getenv("EMBEDDING_MODEL") or "mxbai-embed-large").strip()
 
-    if provider_name == "openai":
-        api_key = os.getenv("OPENAI_API_KEY", "")
+    if provider_name == "ollama":
+        llm_model = (os.getenv("LLM_MODEL") or "llama3:8b-instruct-q4_0").strip()
+        print(f"🤖 Generation: Ollama ({llm_model})  |  Embeddings: Ollama ({embedding_model})")
+        return OllamaProvider(llm_model=llm_model, embedding_model=embedding_model)
+
+    elif provider_name == "openai":
+        api_key = (os.getenv("OPENAI_API_KEY") or "").strip()
         if not api_key:
             raise ValueError(
                 "OPENAI_API_KEY is required when LLM_PROVIDER=openai. "
-                "Add it to your .env file."
+                "Add it to your .env file (or set LLM_PROVIDER=ollama to run locally)."
             )
-        llm_model = os.getenv("OPENAI_LLM_MODEL", "gpt-4o-mini")
+        llm_model = (os.getenv("OPENAI_LLM_MODEL") or "gpt-4o-mini").strip()
         print(f"🤖 Generation: OpenAI ({llm_model})  |  Embeddings: Ollama ({embedding_model})")
         return OpenAIGenerationProvider(
             llm_model=llm_model,
@@ -169,7 +174,7 @@ def get_provider() -> LLMProvider:
             api_key=api_key,
         )
 
-    else:  # default: ollama
-        llm_model = os.getenv("LLM_MODEL", "llama3:8b-instruct-q4_0")
-        print(f"🤖 Generation: Ollama ({llm_model})  |  Embeddings: Ollama ({embedding_model})")
-        return OllamaProvider(llm_model=llm_model, embedding_model=embedding_model)
+    else:
+        raise ValueError(
+            f"Unknown LLM_PROVIDER={provider_name!r}. Valid values: 'openai', 'ollama'."
+        )

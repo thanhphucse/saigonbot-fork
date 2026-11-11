@@ -1,5 +1,5 @@
 {
-  "description": "Eval set for the conversational detector operating point (ACCEPT_TAU/HIGH_TAU/MARGIN). 'positive' entries must resolve to their kind; 'negative' entries must NOT be classified as conversational. Run scripts/calibrate_conversational.py to sweep thresholds.",
+  "description": "Eval set for the conversational detector operating point (ACCEPT_TAU/HIGH_TAU/MARGIN). 'positive' entries must resolve to their kind; 'negative' entries must NOT be classified as conversational.",
   "positive": {
     "greeting": ["hi", "hello there", "hey!", "good morning", "namaste", "hello bot"],
     "thanks": ["thank you", "thanks a lot", "appreciate it", "that helped, thanks", "many thanks"],

@@ -135,6 +135,7 @@ def main() -> None:
                 print(f"    - {m[:160]}")
             if not args.verbose and len(misses) > len(shown):
                 print(f"    ... {len(misses) - len(shown)} more (use --verbose)")
+        sys.exit(1)
     else:
         print("\n✅ Every source fragment is present in the vector store.")
 

@@ -12,9 +12,13 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-API_URL = "http://localhost:8000/chat/text"
+_raw_host = (os.getenv("API_HOST") or "127.0.0.1").strip()
+_client_host = "127.0.0.1" if _raw_host in ("", "0.0.0.0", "::") else _raw_host
+_api_port = (os.getenv("API_PORT") or "8000").strip() or "8000"
+API_BASE_URL = f"http://{_client_host}:{_api_port}"
+API_URL = f"{API_BASE_URL}/chat/text"
 # Configurable timeout from .env (default: 60 seconds for menu queries)
-API_TIMEOUT = int(os.getenv("API_TIMEOUT", "60"))
+API_TIMEOUT = int(os.getenv("API_TIMEOUT") or "60")
 
 def test_query(query, conversation_id=None):
     """Test a single query"""
@@ -52,7 +56,7 @@ def test_query(query, conversation_id=None):
         return result.get('conversation_id')
     except requests.exceptions.ConnectionError:
         print("❌ ERROR: Cannot connect to API. Is the server running?")
-        print("   Start with: python3 run_api.py")
+        print("   Start with: python run_api.py")
         return None
     except Exception as e:
         print(f"❌ ERROR: {e}")
@@ -62,16 +66,16 @@ def main():
     print("\n" + "="*60)
     print("SIMPLE API TEST")
     print("="*60)
-    print("\nMake sure the API server is running: python3 run_api.py")
+    print("\nMake sure the API server is running: python run_api.py")
     print("Press Ctrl+C to exit\n")
     
     # Check if API is running
     try:
-        health = requests.get("http://localhost:8000/health", timeout=2)
+        health = requests.get(f"{API_BASE_URL}/health", timeout=10)
         print("✅ API server is running\n")
     except:
         print("❌ API server is not running!")
-        print("   Please start it with: python3 run_api.py")
+        print("   Please start it with: python run_api.py")
         sys.exit(1)
     
     # Test queries

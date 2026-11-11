@@ -89,8 +89,8 @@ def setup_chromadb(persist_directory: str = "chroma_db"):
 def batch_embeddings(texts: List[str], model: str = None, batch_size: int = 10):
     """Generate embeddings in batches via configured provider."""
     provider = _get_provider()
-    provider_name = os.getenv("LLM_PROVIDER", "ollama").lower()
-    print(f"🔄 Generating embeddings via {provider_name} ({provider.embedding_model})...")
+    provider_name = os.getenv("LLM_PROVIDER", "openai").lower()
+    print(f"🔄 Generating embeddings via Ollama ({provider.embedding_model}, active LLM_PROVIDER={provider_name})...")
 
     embeddings = []
     for i in tqdm(range(0, len(texts), batch_size), desc="Embedding batches"):
@@ -256,7 +256,7 @@ def main():
 
     # Show active provider
     provider = _get_provider()
-    print(f"🤖 Using provider: {os.getenv('LLM_PROVIDER', 'ollama')} | embedding model: {provider.embedding_model}")
+    print(f"🤖 Using provider: {os.getenv('LLM_PROVIDER', 'openai')} | embedding model: {provider.embedding_model}")
 
     # Load menu items
     items = load_menu_items(str(menu_json))

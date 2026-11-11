@@ -12,9 +12,12 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-API_BASE_URL = "http://localhost:8000"
+_raw_host = (os.getenv("API_HOST") or "127.0.0.1").strip()
+_client_host = "127.0.0.1" if _raw_host in ("", "0.0.0.0", "::") else _raw_host
+_api_port = (os.getenv("API_PORT") or "8000").strip() or "8000"
+API_BASE_URL = f"http://{_client_host}:{_api_port}"
 # Configurable timeout from .env (default: 60 seconds for menu queries)
-API_TIMEOUT = int(os.getenv("API_TIMEOUT", "60"))
+API_TIMEOUT = int(os.getenv("API_TIMEOUT") or "60")
 
 
 def test_query(query: str, conversation_id: Optional[str] = None) -> Optional[Dict]:
@@ -32,7 +35,7 @@ def test_query(query: str, conversation_id: Optional[str] = None) -> Optional[Di
         return result
     except requests.exceptions.ConnectionError as e:
         print(f"❌ Connection failed: {e}")
-        print("   Make sure API server is running: python3 run_api.py")
+        print("   Make sure API server is running: python run_api.py")
         return None
     except requests.exceptions.HTTPError as e:
         print(f"❌ HTTP error: {e}")
@@ -252,12 +255,12 @@ def main():
     print("API TEST SUITE")
     print("="*60)
     print(f"\nTesting API at: {API_BASE_URL}")
-    print("Make sure the API server is running: python3 run_api.py")
+    print("Make sure the API server is running: python run_api.py")
     
     # Check if API is running
     if not test_health_endpoint():
         print("\n❌ API server is not running or not accessible!")
-        print("Please start the server with: python3 run_api.py")
+        print("Please start the server with: python run_api.py")
         return
     
     # Run tests

@@ -128,8 +128,7 @@ them only if your query side embeds with the same model — otherwise drop the
 ## Notes
 
 - Chunk ids are deterministic, so re-uploading **upserts** rather than duplicating.
-- Filter `audience == "customer"` for the support bot; internal technical docs
-  stay indexed but never surface in customer answers.
+- Retrieval always scopes to `audience == "customer"` (every chunk in this corpus has `audience="customer"`, and `Chikku_docs/` internal technical docs are not indexed).
 - Chunks are capped at 1100 chars with 120-char overlap — sized for the
   512-token context of `mxbai-embed-large`. Raise `MAX_CHUNK_CHARS` in
   `src/ingest_chikku.py` if you move to a longer-context embedding model.
